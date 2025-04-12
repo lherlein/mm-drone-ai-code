@@ -17,7 +17,10 @@ CommunicationManager::CommunicationManager(QObject* parent)
     : QObject(parent)
     , socket_fd_(-1)
     , running_(false)
-    , connected_(false) {
+    , receive_thread_(nullptr)
+    , discovery_thread_(nullptr)
+    , connected_(false)
+    , last_heartbeat_(std::chrono::steady_clock::now()) {
 }
 
 CommunicationManager::~CommunicationManager() {
@@ -68,9 +71,9 @@ void CommunicationManager::receiveLoop() {
     while (running_) {
         // Send heartbeat periodically
         auto now = std::chrono::steady_clock::now();
-        if (now - lastHeartbeat >= HEARTBEAT_INTERVAL) {
+        if (now - last_heartbeat_ >= HEARTBEAT_INTERVAL) {
             sendHeartbeat();
-            lastHeartbeat = now;
+            last_heartbeat_ = now;
         }
         
         // Send any queued packets
@@ -109,7 +112,7 @@ void CommunicationManager::receiveLoop() {
             std::cerr << "Error receiving data: " << strerror(errno) << std::endl;
         }
         
-        validateConnection();
+        validateConnections();
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
@@ -144,13 +147,21 @@ void CommunicationManager::sendHeartbeat() {
     outgoing_packets_.push(packet);
 }
 
-void CommunicationManager::validateConnection() {
+void CommunicationManager::validateConnections() {
+    std::lock_guard<std::mutex> lock(drones_mutex_);
     auto now = std::chrono::steady_clock::now();
-    bool newStatus = (now - last_heartbeat_) <= HEARTBEAT_TIMEOUT;
     
-    if (connected_ != newStatus) {
-        connected_ = newStatus;
-        emit connectionStatusChanged(connected_);
+    for (auto it = active_drones_.begin(); it != active_drones_.end();) {
+        if (now - it->second.last_seen > CONNECTION_TIMEOUT) {
+            emit droneDisconnected(it->first);
+            it = active_drones_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    
+    if (active_drones_.empty()) {
+        emit connectionStatusChanged(false);
     }
 }
 
@@ -169,7 +180,7 @@ bool CommunicationManager::setupSocket() {
     struct sockaddr_in local_addr;
     local_addr.sin_family = AF_INET;
     local_addr.sin_addr.s_addr = INADDR_ANY;
-    local_addr.sin_port = htons(local_port_);
+    local_addr.sin_port = htons(this->local_port_);
     
     if (bind(socket_fd_, (struct sockaddr*)&local_addr, sizeof(local_addr)) < 0) {
         std::cerr << "Failed to bind socket: " << strerror(errno) << std::endl;
@@ -276,28 +287,14 @@ void CommunicationManager::sendAck(const DroneInfo& drone) {
     *reinterpret_cast<uint64_t*>(data.data() + 8) = drone.token;
     std::copy(drone.address.begin(), drone.address.end(), data.data() + 16);
     
-    protocol::Packet ack = protocol::Packet::createAck(data);
+    protocol::ConfigData config = {};
+    config.mode = 0x01;  // ACK mode
+    std::copy(data.begin(), data.end(), reinterpret_cast<uint8_t*>(&config.pid_gains[0]));
+    
+    protocol::Packet ack = protocol::Packet::createConfig(config);
     
     std::lock_guard<std::mutex> lock(send_mutex_);
     outgoing_packets_.push(ack);
-}
-
-void CommunicationManager::validateConnections() {
-    std::lock_guard<std::mutex> lock(drones_mutex_);
-    auto now = std::chrono::steady_clock::now();
-    
-    for (auto it = active_drones_.begin(); it != active_drones_.end();) {
-        if (now - it->second.last_seen > CONNECTION_TIMEOUT) {
-            emit droneDisconnected(it->first);
-            it = active_drones_.erase(it);
-        } else {
-            ++it;
-        }
-    }
-    
-    if (active_drones_.empty()) {
-        emit connectionStatusChanged(false);
-    }
 }
 
 std::string CommunicationManager::assignAddress() {

@@ -15,6 +15,8 @@ struct ControlData {
     uint16_t aux1;        // Auxiliary channel 1
     uint16_t aux2;        // Auxiliary channel 2
     uint32_t timestamp;   // Milliseconds since epoch
+    bool armed;           // Arming state
+    bool emergency_stop;  // Emergency stop flag
 };
 
 // Telemetry data structure (from ACU to GCU)

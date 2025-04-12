@@ -49,11 +49,11 @@ void InputManager::updateJoystick() {
 
     joystick_->update();
 
-    // Map joystick axes to control values
-    currentControlData_.roll = joystick_->getAxis(0);      // Left stick X
-    currentControlData_.pitch = -joystick_->getAxis(1);    // Left stick Y (inverted)
-    currentControlData_.yaw = joystick_->getAxis(3);       // Right stick X
-    currentControlData_.throttle = -joystick_->getAxis(4); // Right stick Y (inverted)
+    // Map joystick axes to control values (convert -1.0 to 1.0 range to 0-4095)
+    currentControlData_.ailerons = static_cast<uint16_t>((joystick_->getAxis(0) + 1.0f) * 2047.5f);      // Left stick X (roll)
+    currentControlData_.elevator = static_cast<uint16_t>((-joystick_->getAxis(1) + 1.0f) * 2047.5f);     // Left stick Y (pitch)
+    currentControlData_.rudder = static_cast<uint16_t>((joystick_->getAxis(3) + 1.0f) * 2047.5f);        // Right stick X (yaw)
+    currentControlData_.thrust = static_cast<uint16_t>((-joystick_->getAxis(4) + 1.0f) * 2047.5f);       // Right stick Y (throttle)
 }
 
 void InputManager::updateKeyboard() {
@@ -62,20 +62,31 @@ void InputManager::updateKeyboard() {
 }
 
 void InputManager::normalizeAxes() {
-    // Apply deadzone to all axes
-    applyDeadzone(currentControlData_.roll, DEADZONE);
-    applyDeadzone(currentControlData_.pitch, DEADZONE);
-    applyDeadzone(currentControlData_.yaw, DEADZONE);
-    applyDeadzone(currentControlData_.throttle, DEADZONE);
+    // Convert to float for processing (-1.0 to 1.0 range)
+    float ailerons = static_cast<float>(currentControlData_.ailerons) / 2047.5f - 1.0f;
+    float elevator = static_cast<float>(currentControlData_.elevator) / 2047.5f - 1.0f;
+    float rudder = static_cast<float>(currentControlData_.rudder) / 2047.5f - 1.0f;
+    float thrust = static_cast<float>(currentControlData_.thrust) / 2047.5f - 1.0f;
 
-    // Limit throttle change rate
-    static float lastThrottle = 0.0f;
-    float throttleDiff = currentControlData_.throttle - lastThrottle;
-    if (std::abs(throttleDiff) > MAX_THROTTLE_CHANGE) {
-        currentControlData_.throttle = lastThrottle + 
-            (throttleDiff > 0 ? MAX_THROTTLE_CHANGE : -MAX_THROTTLE_CHANGE);
+    // Apply deadzone
+    applyDeadzone(ailerons, DEADZONE);
+    applyDeadzone(elevator, DEADZONE);
+    applyDeadzone(rudder, DEADZONE);
+    applyDeadzone(thrust, DEADZONE);
+
+    // Limit thrust change rate
+    static float lastThrust = 0.0f;
+    float thrustDiff = thrust - lastThrust;
+    if (std::abs(thrustDiff) > MAX_THROTTLE_CHANGE) {
+        thrust = lastThrust + (thrustDiff > 0 ? MAX_THROTTLE_CHANGE : -MAX_THROTTLE_CHANGE);
     }
-    lastThrottle = currentControlData_.throttle;
+    lastThrust = thrust;
+
+    // Convert back to uint16_t range (0-4095)
+    currentControlData_.ailerons = static_cast<uint16_t>((ailerons + 1.0f) * 2047.5f);
+    currentControlData_.elevator = static_cast<uint16_t>((elevator + 1.0f) * 2047.5f);
+    currentControlData_.rudder = static_cast<uint16_t>((rudder + 1.0f) * 2047.5f);
+    currentControlData_.thrust = static_cast<uint16_t>((thrust + 1.0f) * 2047.5f);
 }
 
 void InputManager::applyDeadzone(float& value, float deadzone) {

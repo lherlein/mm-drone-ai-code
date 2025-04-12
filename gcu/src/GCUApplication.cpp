@@ -23,7 +23,7 @@ bool GCUApplication::init() {
     inputManager_ = std::make_unique<control::InputManager>();
 
     // Initialize components
-    if (!commManager_->init("192.168.1.10", 5760, 5761)) {
+    if (!commManager_->init()) {
         std::cerr << "Failed to initialize communication manager" << std::endl;
         return false;
     }

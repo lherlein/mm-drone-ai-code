@@ -50,7 +50,7 @@ public:
     void sendControlData(const protocol::ControlData& controlData);
 
 signals:
-    void telemetryReceived(const protocol::TelemetryData& telemetry);
+    void telemetryReceived(const drone::protocol::TelemetryData& telemetry);
     void connectionStatusChanged(bool connected);
     void droneDiscovered(const std::string& id, uint32_t capabilities);
     void droneConnected(const std::string& id, const std::string& address);
@@ -58,6 +58,9 @@ signals:
 
 private:
     int socket_fd_;
+    uint16_t drone_port_ = 14550;  // Default drone port
+    uint16_t local_port_ = 14551;  // Default local port
+    std::string drone_address_ = "127.0.0.1";  // Default loopback address
     std::atomic<bool> running_;
     std::unique_ptr<std::thread> receive_thread_;
     std::unique_ptr<std::thread> discovery_thread_;
@@ -69,13 +72,21 @@ private:
     std::mutex send_mutex_;
     std::queue<protocol::Packet> outgoing_packets_;
 
+    // Connection state
+    std::atomic<bool> connected_;
+    std::chrono::steady_clock::time_point last_heartbeat_;
+    static constexpr auto HEARTBEAT_INTERVAL = std::chrono::milliseconds(100);
+    static constexpr auto HEARTBEAT_TIMEOUT = std::chrono::milliseconds(500);
+
     void discoveryLoop();
     void receiveLoop();
+    void handleIncomingPacket(const protocol::Packet& packet);
     void handleBeacon(const std::vector<uint8_t>& data);
     void handleSyn(const std::vector<uint8_t>& data);
     void handleSynAck(const std::vector<uint8_t>& data);
     void sendAck(const DroneInfo& drone);
     void validateConnections();
+    void sendHeartbeat();
     bool setupSocket();
     void closeSocket();
     std::string assignAddress();
